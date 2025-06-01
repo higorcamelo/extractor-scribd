@@ -11,7 +11,7 @@ options.binary_location = r"D:\Program Files\Mozilla Firefox\firefox.exe"
 options.headless = False
 
 driver = webdriver.Firefox(options=options)
-url = 'https://pt.scribd.com/document/434649239/The-Concise-Meditations-of-Marcus-Aurelius-by-Robin-Homer'
+url = 'https://pt.scribd.com/document/715699174/ROJAS-BERMUDEZ-Jaime-G-Introducao-Ao-Psicodrama'
 driver.get(url)
 
 # Remove overlays que atrapalham
