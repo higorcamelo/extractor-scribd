@@ -136,16 +136,23 @@ def extract_text(url):
     scroll_page_smooth(driver, pause=0.2)
 
     # Remover banners de cookies e cabeçalhos de uma vez (tudo em uma única linha):
-    driver.execute_script(
-        "document.querySelectorAll("
-        "'div[class*=\"cookie\"], "
-        "div[class*=\"Cookie\"], "
-        "div[id*=\"cookie\"], "
-        "div[class*=\"privacy\"], "
-        "div[id*=\"privacy\"], "
-        "header, nav, .navbar, .site-header'"
-        ").forEach(e => e.remove());"
-    )
+    driver.execute_script("""
+        // Remove banners por classe ou id conhecidos
+        document.querySelectorAll(
+            'div[class*="cookie"], div[class*="Cookie"], div[id*="cookie"], '
+            + 'div[class*="privacy"], div[id*="privacy"], '
+            + 'header, nav, .navbar, .site-header'
+        ).forEach(e => e.remove());
+
+        // Remove absolutamente qualquer elemento com position fixed ou sticky que não seja parte das páginas
+        Array.from(document.querySelectorAll('body *')).forEach(el => {
+            const style = window.getComputedStyle(el);
+            if ((style.position === 'fixed' || style.position === 'sticky') 
+                && !el.closest('#document_container')) {
+                el.remove();
+            }
+        });
+    """)
     time.sleep(0.5)
 
     # Força cada página a ficar na viewport
