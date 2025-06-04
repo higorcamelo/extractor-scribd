@@ -1,5 +1,3 @@
-# extractor.py
-
 import os
 import time
 import requests
@@ -17,6 +15,7 @@ def setup_driver():
     options.binary_location = r"D:\Program Files\Mozilla Firefox\firefox.exe"
     options.headless = False  # Mude para True se quiser rodar sem interface
     driver = webdriver.Firefox(options=options)
+    driver.set_window_size(1920, 4000)
     return driver
 
 
@@ -55,29 +54,23 @@ def hardcore_block(driver):
 
 
 def detect_document_type(url):
-    """
-    Abre o URL, bloqueia paywalls/script e faz scroll mínimo para renderizar.
-    Retorna:
-      - "scan" se houver mais imagens (img.absimg) do que camadas de texto (div.text_layer)
-      - "text" se houver ao menos uma camada de texto (div.text_layer)
-      - "unknown" caso contrário
-    """
     driver = setup_driver()
     driver.get(url)
 
     hardcore_block(driver)
-    time.sleep(1)  # aguarda renderizar o conteúdo inicial
+    scroll_page_smooth(driver, pause=0.2)
 
-    # Conta quantas <img class="absimg"> e quantas <div class="text_layer">
-    has_images = driver.execute_script("return document.querySelectorAll('img.absimg').length")
+    time.sleep(1)  # Dá tempo para o conteúdo aparecer
+
     has_text = driver.execute_script("return document.querySelectorAll('div.text_layer').length")
+    has_images = driver.execute_script("return document.querySelectorAll('img.absimg').length")
 
     driver.quit()
 
-    if has_images > has_text:
-        return "scan"
-    elif has_text > 0:
+    if has_text > 0:
         return "text"
+    elif has_images > 0:
+        return "scan"
     else:
         return "unknown"
 
@@ -133,23 +126,41 @@ def extract_images(url, output_folder):
 
 def extract_text(url):
     """
-    Gera um screenshot (PNG) de cada página renderizada do Scribd (quando o documento for 'text'),
-    salva em output/page_XXX.png e retorna a lista de caminhos dessas imagens.
+    Captura screenshots das páginas de livros com texto renderizado no Scribd.
+    Extrai somente o conteúdo visual da página, sem cabeçalho, rodapé ou interface do site.
     """
     driver = setup_driver()
     driver.get(url)
 
     hardcore_block(driver)
-    scroll_page_smooth(driver)
+    scroll_page_smooth(driver, pause=0.2)
 
-    # Garante que cada página esteja visível para lazy load
-    driver.execute_script("""
-        document.querySelectorAll('div.outer_page_container > div[id^="outer_page_"]').forEach(c => c.scrollIntoView());
-    """)
-    time.sleep(1)
+    # Remover banners de cookies e cabeçalhos de uma vez (tudo em uma única linha):
+    driver.execute_script(
+        "document.querySelectorAll("
+        "'div[class*=\"cookie\"], "
+        "div[class*=\"Cookie\"], "
+        "div[id*=\"cookie\"], "
+        "div[class*=\"privacy\"], "
+        "div[id*=\"privacy\"], "
+        "header, nav, .navbar, .site-header'"
+        ").forEach(e => e.remove());"
+    )
+    time.sleep(0.5)
+
+    # Força cada página a ficar na viewport
+    driver.execute_script(
+        "document.querySelectorAll("
+        "'div.outer_page_container > div[id^=\"outer_page_\"]'"
+        ").forEach(c => c.scrollIntoView());"
+    )
+    time.sleep(0.5)
 
     document_container = driver.find_element(By.ID, "document_container")
-    pages = document_container.find_elements(By.CSS_SELECTOR, "div.outer_page_container > div[id^='outer_page_']")
+    pages = document_container.find_elements(
+        By.CSS_SELECTOR,
+        "div.outer_page_container > div[id^='outer_page_']"
+    )
 
     output_folder = "output"
     os.makedirs(output_folder, exist_ok=True)
@@ -159,9 +170,13 @@ def extract_text(url):
     print(f"📄 Documento de texto com {total} páginas. Salvando screenshots...")
 
     for i, page_div in enumerate(pages):
+        try:
+            newpage = page_div.find_element(By.CSS_SELECTOR, "div.newpage")
+        except:
+            newpage = page_div
+
         file_path = os.path.join(output_folder, f"page_{i+1:03}.png")
-        # Faz screenshot apenas da região da div específica
-        page_div.screenshot(file_path)
+        newpage.screenshot(file_path)
         screenshots.append(file_path)
         print(f"📸 Screenshot página {i+1} de {total} salva.")
 
