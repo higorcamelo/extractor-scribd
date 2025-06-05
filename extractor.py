@@ -17,7 +17,7 @@ def setup_driver():
     necessária para executar o CDP (Chrome DevTools Protocol).
     """
     options = Options()
-    options.add_argument("--headless")  # modo headless
+    #options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     # Para permitir usar Page.captureScreenshot, não colocamos nenhuma limitação de tamanho via window_size
     service = EdgeService(EdgeChromiumDriverManager().install())
