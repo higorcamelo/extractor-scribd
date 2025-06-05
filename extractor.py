@@ -2,19 +2,21 @@ import os
 import time
 import requests
 from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.edge.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.edge.service import Service as EdgeService
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
 
 
 def setup_driver():
     """
-    Cria e retorna uma instância do Firefox WebDriver com perfil mínimo,
+    Cria e retorna uma instância do Edge WebDriver com perfil mínimo,
     sem carregar extensões e com paywalls/modais bloqueados em seguida.
     """
     options = Options()
-    options.binary_location = r"D:\Program Files\Mozilla Firefox\firefox.exe"
-    options.headless = False  # Mude para True se quiser rodar sem interface
-    driver = webdriver.Firefox(options=options)
+    options.headless = True  # Mude para False se quiser rodar com interface
+    service = EdgeService(EdgeChromiumDriverManager().install())
+    driver = webdriver.Edge(service=service, options=options)
     driver.set_window_size(1920, 4000)
     return driver
 
