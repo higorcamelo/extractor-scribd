@@ -1,5 +1,8 @@
+# extractor.py
+
 import os
 import time
+import base64
 import requests
 from selenium import webdriver
 from selenium.webdriver.edge.options import Options
@@ -10,14 +13,16 @@ from webdriver_manager.microsoft import EdgeChromiumDriverManager
 
 def setup_driver():
     """
-    Cria e retorna uma instância do Edge WebDriver com perfil mínimo,
-    sem carregar extensões e com paywalls/modais bloqueados em seguida.
+    Cria e retorna uma instância do Edge WebDriver em modo headless,
+    necessária para executar o CDP (Chrome DevTools Protocol).
     """
     options = Options()
-    options.headless = True  # Mude para False se quiser rodar com interface
+    options.add_argument("--headless")  # modo headless
+    options.add_argument("--disable-gpu")
+    # Para permitir usar Page.captureScreenshot, não colocamos nenhuma limitação de tamanho via window_size
     service = EdgeService(EdgeChromiumDriverManager().install())
     driver = webdriver.Edge(service=service, options=options)
-    driver.set_window_size(1920, 4000)
+    driver.set_window_size(1920, 2000)  # tamanho “mínimo”; não importa muito, pois vamos “clipar” via CDP
     return driver
 
 
@@ -51,18 +56,24 @@ def hardcore_block(driver):
         document.querySelectorAll('script').forEach(e => e.remove());
         document.querySelectorAll('.overlay, .modal, .paywall, .popup, .login-prompt, .container-overlay').forEach(e => e.remove());
     """)
-    # aguarda um instante para garantir que não há JS residual
-    time.sleep(0.5)
+    time.sleep(0.5)  # aguarda JS residual ser interrompido
 
 
 def detect_document_type(url):
+    """
+    Abre o URL no Edge, limpa paywalls e faz scroll mínimo para renderizar.
+    Retorna:
+      - "text" se detectar pelo menos um <div class="text_layer">
+      - "scan" se detectar pelo menos um <img class="absimg">
+      - "unknown" caso contrário
+    """
     driver = setup_driver()
     driver.get(url)
 
     hardcore_block(driver)
     scroll_page_smooth(driver, pause=0.2)
 
-    time.sleep(1)  # Dá tempo para o conteúdo aparecer
+    time.sleep(1)  # dá tempo para renderizar
 
     has_text = driver.execute_script("return document.querySelectorAll('div.text_layer').length")
     has_images = driver.execute_script("return document.querySelectorAll('img.absimg').length")
@@ -88,13 +99,12 @@ def extract_images(url, output_folder):
     hardcore_block(driver)
     scroll_page_smooth(driver)
 
-    # Após o scroll, força cada página a estar na viewport (por via das dúvidas)
+    # Força cada página a ficar visível
     driver.execute_script("""
         document.querySelectorAll('div.outer_page_container > div[id^="outer_page_"]').forEach(c => c.scrollIntoView());
     """)
     time.sleep(1)
 
-    # Seleciona o container principal e depois todas as páginas
     document_container = driver.find_element(By.ID, "document_container")
     pages = document_container.find_elements(By.CSS_SELECTOR, "div.outer_page_container > div[id^='outer_page_']")
 
@@ -106,9 +116,7 @@ def extract_images(url, output_folder):
             if src and src.startswith("http"):
                 img_urls.append(src)
 
-    # Cria a pasta de saída se não existir
     os.makedirs(output_folder, exist_ok=True)
-
     images = []
     for i, img_url in enumerate(img_urls):
         try:
@@ -128,8 +136,9 @@ def extract_images(url, output_folder):
 
 def extract_text(url):
     """
-    Captura screenshots das páginas de livros com texto renderizado no Scribd.
-    Extrai somente o conteúdo visual da página, sem cabeçalho, rodapé ou interface do site.
+    Captura screenshots das páginas de livros com texto renderizado no Scribd,
+    usando CDP para “clipar” exatamente a bounding‐box de cada elemento.
+    Retorna lista de caminhos dos PNGs gerados.
     """
     driver = setup_driver()
     driver.get(url)
@@ -137,19 +146,17 @@ def extract_text(url):
     hardcore_block(driver)
     scroll_page_smooth(driver, pause=0.2)
 
-    # Remover banners de cookies e cabeçalhos de uma vez (tudo em uma única linha):
+    # Remove banners, headers e elementos fixos incômodos
     driver.execute_script("""
-        // Remove banners por classe ou id conhecidos
         document.querySelectorAll(
             'div[class*="cookie"], div[class*="Cookie"], div[id*="cookie"], '
             + 'div[class*="privacy"], div[id*="privacy"], '
             + 'header, nav, .navbar, .site-header'
         ).forEach(e => e.remove());
 
-        // Remove absolutamente qualquer elemento com position fixed ou sticky que não seja parte das páginas
         Array.from(document.querySelectorAll('body *')).forEach(el => {
             const style = window.getComputedStyle(el);
-            if ((style.position === 'fixed' || style.position === 'sticky') 
+            if ((style.position === 'fixed' || style.position === 'sticky')
                 && !el.closest('#document_container')) {
                 el.remove();
             }
@@ -157,12 +164,10 @@ def extract_text(url):
     """)
     time.sleep(0.5)
 
-    # Força cada página a ficar na viewport
-    driver.execute_script(
-        "document.querySelectorAll("
-        "'div.outer_page_container > div[id^=\"outer_page_\"]'"
-        ").forEach(c => c.scrollIntoView());"
-    )
+    # Garante que cada página esteja visível para lazy load
+    driver.execute_script("""
+        document.querySelectorAll('div.outer_page_container > div[id^="outer_page_"]').forEach(c => c.scrollIntoView());
+    """)
     time.sleep(0.5)
 
     document_container = driver.find_element(By.ID, "document_container")
@@ -171,23 +176,46 @@ def extract_text(url):
         "div.outer_page_container > div[id^='outer_page_']"
     )
 
-    output_folder = "output"
-    os.makedirs(output_folder, exist_ok=True)
-
+    os.makedirs("output", exist_ok=True)
     screenshots = []
     total = len(pages)
-    print(f"📄 Documento de texto com {total} páginas. Salvando screenshots...")
+    print(f"📄 Documento de texto com {total} páginas. Salvando screenshots via CDP...")
 
     for i, page_div in enumerate(pages):
-        try:
-            newpage = page_div.find_element(By.CSS_SELECTOR, "div.newpage")
-        except:
-            newpage = page_div
+        # 1) Medir a bounding‐box: x, y, width, height (pixels reais)
+        bbox = page_div.rect
+        x = int(bbox['x'])
+        y = int(bbox['y'])
+        width = int(bbox['width'])
+        height = int(bbox['height'])
 
-        file_path = os.path.join(output_folder, f"page_{i+1:03}.png")
-        newpage.screenshot(file_path)
+        # 2) ScrollIntoView (para garantir que o elemento não esteja parcialmente fora de tela)
+        driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", page_div)
+        time.sleep(0.1)
+
+        # 3) Montar objeto “clip” para CDP, sem margem de zoom (scale = 1)
+        clip = {
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "scale": 1
+        }
+
+        # 4) Invocar Page.captureScreenshot via CDP
+        result = driver.execute_cdp_cmd("Page.captureScreenshot", {
+            "format": "png",
+            "fromSurface": True,
+            "clip": clip
+        })
+
+        # 5) Decodificar base64 e salvar como PNG
+        png_data = base64.b64decode(result["data"])
+        file_path = os.path.join("output", f"page_{i+1:03}.png")
+        with open(file_path, "wb") as f:
+            f.write(png_data)
         screenshots.append(file_path)
-        print(f"📸 Screenshot página {i+1} de {total} salva.")
+        print(f"📸 Screenshot página {i+1} de {total} salva (via CDP).")
 
     driver.quit()
     return screenshots
