@@ -1,4 +1,4 @@
-# extractor scribd
+# Extractor Scribd
 
 ### Afazeres
 - [x] Detectar e extrair livros de scan e texto
@@ -7,8 +7,8 @@
 - [x] Baixar páginas em PNG apenas temporariamente
 - [x] Compilar as páginas baixadas em PDF e depois excluí-las
 - [x] Criar uma interface provavelmente em web app executável via um exe ou coisa do tipo (provavelmente Streamlit)
-- [ ] Descobrir como impedir que as páginas fiquem cortadas
-- [ ] Inserir uma forma de demonstrar progresso para o usuário
+- [x] Descobrir como impedir que as páginas fiquem cortadas
+- [x] Inserir uma forma de demonstrar progresso para o usuário
 
 ⚠️ **Aviso Legal:**  
 Este projeto é apenas para fins educacionais e uso pessoal.  
