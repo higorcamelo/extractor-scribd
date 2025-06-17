@@ -1,16 +1,16 @@
 import sys
 import os
-from tkinter import Tk, filedialog
 
 from nicegui import ui
-from extractor import detect_document_type, extract_text
+from extractor_text import detect_document_type as detect_type
+from extractor_text import extract_text
+from extractor_scan import extract_images
 from renderer import save_images_to_pdf
 
-# 📂 Pasta padrão
 output_folder = "output"
 os.makedirs(output_folder, exist_ok=True)
 
-log_box = None  # Defina como global
+log_box = None  # Definido globalmente
 
 class GuiLogger:
     def __init__(self, log_box):
@@ -25,36 +25,36 @@ class GuiLogger:
     def flush(self):
         self._stdout.flush()
 
-def selecionar_pasta():
-    """Abre uma janela nativa para selecionar pasta."""
-    root = Tk()
-    root.withdraw()
-    pasta_selecionada = filedialog.askdirectory()
-    if pasta_selecionada:
-        pasta.value = pasta_selecionada
-
-def log(mensagem: str):
-    """Adiciona uma linha no log da interface e no console."""
-    log_box.value += f'{mensagem}\n'
-    sys.__stdout__.write(mensagem + '\n')  # Garante que também vai para o terminal
-
 async def baixar_documento():
-    """Executa o processo de download e geração do PDF."""
     log_box.value = ""
+    url = link.value.strip()
+    nome = nome_pdf.value.strip()
 
-    print('🔍 Detectando tipo de documento...')
-    doc_type = detect_document_type(link.value)
-
-    if doc_type != 'text':
-        print('❌ Documento não suportado ou inválido.')
-        ui.notify('❌ Documento não é de texto renderizado ou não foi detectado corretamente.')
+    if not url:
+        print("❌ Link não pode estar vazio.")
+        ui.notify("❌ Link inválido.")
         return
 
-    print('📥 Baixando páginas...')
-    imagens = extract_text(link.value)
+    print('🔍 Detectando tipo de documento...')
+    tipo = detect_type(url)
+
+    if tipo == 'text':
+        print("📘 Documento identificado como TEXTO.")
+        print('📥 Baixando páginas (texto)...')
+        imagens = extract_text(url)
+
+    elif tipo == 'scan':
+        print("📕 Documento identificado como SCAN.")
+        print('📥 Baixando imagens...')
+        imagens = extract_images(url, output_folder)
+
+    else:
+        print("❌ Documento não reconhecido ou não suportado.")
+        ui.notify("❌ Documento não reconhecido ou não suportado.")
+        return
 
     print('🗜️ Gerando PDF...')
-    pdf_path = os.path.join(pasta.value, f'{nome_pdf.value}.pdf')
+    pdf_path = os.path.join(pasta.value, f'{nome}.pdf')
     save_images_to_pdf(imagens, pdf_path)
 
     if not manter_png.value:
@@ -87,7 +87,6 @@ def home():
             global pasta
             pasta = ui.input('Pasta de saída').classes('w-full').props('readonly')
             pasta.value = output_folder
-            ui.button('📁 Browse', on_click=selecionar_pasta).classes('ml-2')
 
         global manter_png
         manter_png = ui.checkbox('🖼️ Manter PNGs após gerar o PDF')
@@ -98,8 +97,6 @@ def home():
         ui.label('📝 Log de Execução').classes('text-md font-medium mt-2')
 
         log_box = ui.textarea('').props('readonly').classes('w-full h-64 bg-gray-100 rounded p-2')
-
-        # Redireciona o print para o log_box
         sys.stdout = GuiLogger(log_box)
 
 @ui.page('/biblioteca')
@@ -120,10 +117,7 @@ def biblioteca():
                 with lista:
                     with ui.row().classes('items-center'):
                         ui.label(arquivo)
-                        ui.button(
-                            'Abrir',
-                            on_click=lambda a=arquivo: os.startfile(os.path.join(output_folder, a))
-                        ).classes('ml-4')
+                        ui.button('Abrir', on_click=lambda a=arquivo: os.startfile(os.path.join(output_folder, a))).classes('ml-4')
                         ui.button(
                             'Deletar',
                             on_click=lambda a=arquivo: (
