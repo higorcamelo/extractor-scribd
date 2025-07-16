@@ -11,16 +11,61 @@ from webdriver_manager.microsoft import EdgeChromiumDriverManager
 
 def setup_driver():
     """
-    Cria e retorna uma instância do Edge WebDriver em modo headless,
-    necessária para executar o CDP (Chrome DevTools Protocol).
+    Cria e retorna uma instância do Edge WebDriver com múltiplos fallbacks
+    para máxima compatibilidade em diferentes sistemas.
     """
     options = Options()
-    options.add_argument("--headless")  # modo headless
+    options.add_argument("--headless")
     options.add_argument("--disable-gpu")
-    # Para permitir usar Page.captureScreenshot, não colocamos nenhuma limitação de tamanho via window_size
-    service = EdgeService(EdgeChromiumDriverManager().install())
-    driver = webdriver.Edge(service=service, options=options)
-    driver.set_window_size(1920, 2000)  # tamanho “mínimo”; não importa muito, pois vamos “clipar” via CDP
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-web-security")
+    options.add_argument("--allow-running-insecure-content")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+    
+    print("🔧 Inicializando EdgeDriver...")
+    
+    # Múltiplos métodos de fallback
+    methods = [
+        ("WebDriver Manager (cache)", lambda: EdgeService(EdgeChromiumDriverManager(cache_valid_range=30).install())),
+        ("WebDriver Manager (fresh)", lambda: EdgeService(EdgeChromiumDriverManager().install())),
+        ("Driver do sistema", lambda: EdgeService()),
+        ("Chrome como fallback", lambda: setup_chrome_fallback()),
+    ]
+    
+    for method_name, method_func in methods:
+        try:
+            print(f"🔄 Tentando: {method_name}")
+            service = method_func()
+            driver = webdriver.Edge(service=service, options=options)
+            driver.set_window_size(1920, 2000)
+            print(f"✅ EdgeDriver inicializado com sucesso via {method_name}")
+            return driver
+        except Exception as e:
+            print(f"❌ Falhou {method_name}: {str(e)[:100]}...")
+            continue
+    
+    raise RuntimeError("❌ Todos os métodos de inicialização falharam")
+
+
+def setup_chrome_fallback():
+    """
+    Fallback para Chrome se Edge não funcionar.
+    """
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.chrome.service import Service as ChromeService
+    from webdriver_manager.chrome import ChromeDriverManager
+    
+    print("🔄 Tentando Chrome como fallback...")
+    chrome_options = ChromeOptions()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    service = ChromeService(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
 
@@ -58,32 +103,38 @@ def hardcore_block(driver):
 
 
 def detect_document_type(url):
-    """
-    Abre o URL no Edge, limpa paywalls e faz scroll mínimo para renderizar.
-    Retorna:
-      - "text" se detectar pelo menos um <div class="text_layer">
-      - "scan" se detectar pelo menos um <img class="absimg">
-      - "unknown" caso contrário
-    """
     driver = setup_driver()
-    driver.get(url)
-
-    hardcore_block(driver)
-    scroll_page_smooth(driver, pause=0.2)
-
-    time.sleep(1)  # dá tempo para renderizar
-
-    has_text = driver.execute_script("return document.querySelectorAll('div.text_layer').length")
-    has_images = driver.execute_script("return document.querySelectorAll('img.absimg').length")
-
-    driver.quit()
-
-    if has_text > 0:
-        return "text"
-    elif has_images > 0:
-        return "scan"
-    else:
+    try:
+        print(f"🌐 Tentando acessar: {url}")
+        
+        # Adiciona timeout específico
+        driver.set_page_load_timeout(30)
+        driver.get(url)
+        print("✅ Página carregada com sucesso")
+        
+        hardcore_block(driver)
+        scroll_page_smooth(driver, pause=0.2)
+        time.sleep(1)
+        
+        has_text = driver.execute_script("return document.querySelectorAll('div.text_layer').length")
+        has_images = driver.execute_script("return document.querySelectorAll('img.absimg').length")
+        
+        print(f"🔍 Elementos encontrados: {has_text} text_layer, {has_images} imagens")
+        
+        if has_text > 0:
+            return "text"
+        elif has_images > 0:
+            return "scan"
+        else:
+            return "unknown"
+            
+    except Exception as e:
+        print(f"❌ Erro detalhado: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return "unknown"
+    finally:
+        driver.quit()
 
 
 def extract_images(url, output_folder):
@@ -135,7 +186,7 @@ def extract_images(url, output_folder):
 def extract_text(url):
     """
     Captura screenshots das páginas de livros com texto renderizado no Scribd,
-    usando CDP para “clipar” exatamente a bounding‐box de cada elemento.
+    usando CDP para "clipar" exatamente a bounding‐box de cada elemento.
     Retorna lista de caminhos dos PNGs gerados.
     """
     driver = setup_driver()
@@ -180,40 +231,52 @@ def extract_text(url):
     print(f"📄 Documento de texto com {total} páginas. Salvando screenshots via CDP...")
 
     for i, page_div in enumerate(pages):
-        # 1) Medir a bounding‐box: x, y, width, height (pixels reais)
-        bbox = page_div.rect
-        x = int(bbox['x'])
-        y = int(bbox['y'])
-        width = int(bbox['width'])
-        height = int(bbox['height'])
+        try:
+            # 1) Medir a bounding‐box: x, y, width, height (pixels reais)
+            bbox = page_div.rect
+            x = int(bbox['x'])
+            y = int(bbox['y'])
+            width = int(bbox['width'])
+            height = int(bbox['height'])
 
-        # 2) ScrollIntoView (para garantir que o elemento não esteja parcialmente fora de tela)
-        driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", page_div)
-        time.sleep(0.1)
+            # 2) ScrollIntoView (para garantir que o elemento não esteja parcialmente fora de tela)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'start'});", page_div)
+            time.sleep(0.1)
 
-        # 3) Montar objeto “clip” para CDP, sem margem de zoom (scale = 1)
-        clip = {
-            "x": x,
-            "y": y,
-            "width": width,
-            "height": height,
-            "scale": 1
-        }
+            # 3) Montar objeto "clip" para CDP, sem margem de zoom (scale = 1)
+            clip = {
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "scale": 1
+            }
 
-        # 4) Invocar Page.captureScreenshot via CDP
-        result = driver.execute_cdp_cmd("Page.captureScreenshot", {
-            "format": "png",
-            "fromSurface": True,
-            "clip": clip
-        })
+            # 4) Invocar Page.captureScreenshot via CDP
+            result = driver.execute_cdp_cmd("Page.captureScreenshot", {
+                "format": "png",
+                "fromSurface": True,
+                "clip": clip
+            })
 
-        # 5) Decodificar base64 e salvar como PNG
-        png_data = base64.b64decode(result["data"])
-        file_path = os.path.join("output", f"page_{i+1:03}.png")
-        with open(file_path, "wb") as f:
-            f.write(png_data)
-        screenshots.append(file_path)
-        print(f"📸 Screenshot página {i+1} de {total} salva (via CDP).")
+            # 5) Decodificar base64 e salvar como PNG
+            png_data = base64.b64decode(result["data"])
+            file_path = os.path.join("output", f"page_{i+1:03}.png")
+            with open(file_path, "wb") as f:
+                f.write(png_data)
+            screenshots.append(file_path)
+            print(f"📸 Screenshot página {i+1} de {total} salva (via CDP).")
+
+        except Exception as e:
+            print(f"❌ Erro na página {i+1}: {e}")
+            # Fallback para screenshot normal se CDP falhar
+            try:
+                file_path = os.path.join("output", f"page_{i+1:03}.png")
+                page_div.screenshot(file_path)
+                screenshots.append(file_path)
+                print(f"📸 Screenshot página {i+1} de {total} salva (fallback).")
+            except Exception as e2:
+                print(f"❌ Fallback também falhou para página {i+1}: {e2}")
 
     driver.quit()
     return screenshots

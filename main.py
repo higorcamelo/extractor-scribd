@@ -10,24 +10,8 @@ from renderer import save_images_to_pdf
 output_folder = "output"
 os.makedirs(output_folder, exist_ok=True)
 
-# Tema customizado DarkBlueSmooth, usando a função correta para adicionar tema antes de setar
-custom_theme = {
-    'BACKGROUND': '#121A2B',
-    'TEXT': '#E0E6F0',
-    'INPUT': '#1E2747',
-    'TEXT_INPUT': '#D0D8FF',
-    'SCROLL': '#2A3558',
-    'BUTTON': ('#E0E6F0', '#3B5A99'),
-    'BUTTON_HOVER': ('#FFFFFF', '#5A7BCF'),
-    'FRAME_BACKGROUND': '#1A2340',
-    'BORDER': 0,
-}
-
-# Registrar tema antes de usar
-if 'DarkBlueSmooth' not in sg.theme_list():
-    sg.theme_add_new('DarkBlueSmooth', custom_theme)
-
-sg.theme('DarkBlueSmooth')
+# Usar um tema existente ao invés de customizado
+sg.theme('DarkBlue3')  # Tema similar ao que você queria
 
 FONT_TITLE = ('Segoe UI', 16, 'bold')
 FONT_LABEL = ('Segoe UI', 11)
@@ -108,11 +92,10 @@ def main():
                     [sg.Checkbox('🖼️ Manter PNGs após gerar o PDF', key='-MANTERPNG-', font=FONT_LABEL, pad=((0,0),(20,10)))]
                   ], element_justification='left', expand_x=True)],
 
-        [sg.Button('📥 Baixar e gerar PDF', size=(40,1), font=FONT_LABEL, button_color=custom_theme['BUTTON'])],
+        [sg.Button('📥 Baixar e gerar PDF', size=(40,1), font=FONT_LABEL)],
 
         [sg.Text('📝 Log de Execução:', font=FONT_LABEL, pad=((0,0),(15,5)))],
-        [sg.Multiline('', key='-LOG-', size=(80, 20), autoscroll=True, disabled=True, 
-                      background_color=custom_theme['INPUT'], text_color=custom_theme['TEXT_INPUT'], font=FONT_LOG)],
+        [sg.Multiline('', key='-LOG-', size=(80, 20), autoscroll=True, disabled=True, font=FONT_LOG)],
     ]
 
     window = sg.Window('Scribd Downloader', layout, finalize=True, resizable=False, element_justification='center')
